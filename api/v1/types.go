@@ -123,6 +123,44 @@ type GraphSummary struct {
 	Languages []string `json:"languages,omitempty"`
 }
 
+type GraphNode struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	Path        string `json:"path,omitempty"`
+	Language    string `json:"language,omitempty"`
+	PackagePath string `json:"package,omitempty"`
+	StartLine   int    `json:"start_line,omitempty"`
+	EndLine     int    `json:"end_line,omitempty"`
+	External    bool   `json:"external,omitempty"`
+}
+
+type GraphEdge struct {
+	From       string `json:"from"`
+	To         string `json:"to"`
+	Relation   string `json:"relation"`
+	Evidence   string `json:"evidence"`
+	Resolution string `json:"resolution"`
+	Extractor  string `json:"extractor"`
+	SourcePath string `json:"source_path,omitempty"`
+	StartLine  int    `json:"start_line,omitempty"`
+}
+
+type QueryArguments struct {
+	Name    string `json:"name,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Package string `json:"package,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+}
+
+type QueryData struct {
+	Matches   []string    `json:"matches"`
+	Nodes     []GraphNode `json:"nodes"`
+	Edges     []GraphEdge `json:"edges"`
+	Truncated bool        `json:"truncated,omitempty"`
+}
+
 type ScanData struct {
 	Snapshot Snapshot     `json:"snapshot"`
 	Graph    GraphSummary `json:"graph"`
