@@ -14,17 +14,17 @@ import (
 )
 
 type IsolationAttestation struct {
-	FreshContext          bool `json:"fresh_context"`
-	SawEvaluatorManifest  bool `json:"saw_evaluator_manifest"`
-	SawOtherArmOutput     bool `json:"saw_other_arm_output"`
+	FreshContext         bool `json:"fresh_context"`
+	SawEvaluatorManifest bool `json:"saw_evaluator_manifest"`
+	SawOtherArmOutput    bool `json:"saw_other_arm_output"`
 }
 
 type Submission struct {
-	Run               Run                  `json:"run"`
-	BundleDigest      string               `json:"bundle_digest"`
-	FixtureDigest     string               `json:"fixture_digest"`
-	ContextID         string               `json:"context_id"`
-	Isolation         IsolationAttestation `json:"isolation"`
+	Run           Run                  `json:"run"`
+	BundleDigest  string               `json:"bundle_digest"`
+	FixtureDigest string               `json:"fixture_digest"`
+	ContextID     string               `json:"context_id"`
+	Isolation     IsolationAttestation `json:"isolation"`
 }
 
 type Comparison struct {
