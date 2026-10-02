@@ -1,0 +1,27 @@
+{
+  "run": {
+    "benchmark_version": 1,
+    "fixture_id": "codebase-bench-v1-fixture-1",
+    "task_id": "locate-service",
+    "arm": "raw",
+    "repository_revision": "53443b93821d12448513da5bcdee75393d45a41e",
+    "facts": [
+      "declares|lib/service.go|example.com/bench/lib.Service"
+    ],
+    "cost": {
+      "tool_calls": null,
+      "files_opened": null,
+      "input_tokens": null,
+      "output_tokens": null,
+      "elapsed_ms": null
+    }
+  },
+  "bundle_digest": "replace-with-generated-bundle-digest",
+  "fixture_digest": "replace-with-generated-fixture-digest",
+  "context_id": "replace-with-fresh-context-id",
+  "isolation": {
+    "fresh_context": true,
+    "saw_evaluator_manifest": false,
+    "saw_other_arm_output": false
+  }
+}
