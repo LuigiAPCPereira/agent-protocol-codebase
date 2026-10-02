@@ -16,13 +16,13 @@ import (
 )
 
 type SmokeReport struct {
-	BenchmarkVersion    int      `json:"benchmark_version"`
-	FixtureID           string   `json:"fixture_id"`
-	Arm                 string   `json:"arm"`
+	BenchmarkVersion     int      `json:"benchmark_version"`
+	FixtureID            string   `json:"fixture_id"`
+	Arm                  string   `json:"arm"`
 	RepositoryRevision string   `json:"repository_revision"`
-	Setup               Setup    `json:"setup"`
-	Scores              []Score  `json:"scores"`
-	Notes               []string `json:"notes"`
+	Setup                Setup    `json:"setup"`
+	Scores               []Score  `json:"scores"`
+	Notes                []string `json:"notes"`
 }
 
 type Setup struct {
