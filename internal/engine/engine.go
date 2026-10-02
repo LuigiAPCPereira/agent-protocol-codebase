@@ -3,12 +3,14 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	apiv1 "github.com/LuigiAPCPereira/agent-protocol-codebase/api/v1"
 	"github.com/LuigiAPCPereira/agent-protocol-codebase/internal/repository"
 	"github.com/LuigiAPCPereira/agent-protocol-codebase/internal/snapshot"
+	"github.com/LuigiAPCPereira/agent-protocol-codebase/internal/store"
 )
 
 const Version = "0.0.0-dev"
@@ -53,21 +55,10 @@ func executeStatus(ctx context.Context, req apiv1.Request, result apiv1.Result) 
 	}
 
 	result.Repository = observedRepository(req.Repository.ID, state)
-	result.Capabilities = []apiv1.Capability{
-		{
-			Name:       "repository.identity",
-			Available:  true,
-			Resolution: "exact",
-		},
-		{
-			Name:      "index",
-			Available: false,
-			Reason:    "persistent structural index is not implemented yet",
-		},
-	}
+	result.Index, result.Capabilities = persistedIndexStatus(ctx, state)
 
-	if err := verifyExpectation(req.Repository.Revision, result.Repository.Revision); err != nil {
-		result.Error = err
+	if expectationErr := verifyExpectation(req.Repository.Revision, result.Repository.Revision); expectationErr != nil {
+		result.Error = expectationErr
 		return result
 	}
 
@@ -110,29 +101,12 @@ func executeScan(ctx context.Context, req apiv1.Request, result apiv1.Result) ap
 		return result
 	}
 
-	after, err := inspectRepository(ctx, before.Root)
+	afterRead, err := inspectRepository(ctx, before.Root)
 	if err != nil {
 		return repositoryInspectionError(result, err)
 	}
-	if !repository.SameIdentity(before, after) {
-		result.Repository = observedRepository(req.Repository.ID, after)
-		result.Error = &apiv1.APIError{
-			Code:      "WORKSPACE_CHANGED_DURING_SCAN",
-			Message:   "repository identity changed while the snapshot was being built",
-			Retryable: true,
-		}
-		return result
-	}
-
-	apiSources := make([]apiv1.Source, 0, len(built.Sources))
-	for _, source := range built.Sources {
-		apiSources = append(apiSources, apiv1.Source{
-			Path:        source.Path,
-			Kind:        apiv1.SourceKind(source.Kind),
-			Executable:  source.Executable,
-			ContentHash: source.ContentHash,
-			Size:        source.Size,
-		})
+	if !repository.SameIdentity(before, afterRead) {
+		return workspaceChangedResult(result, req.Repository.ID, afterRead, false)
 	}
 
 	indexState := apiv1.IndexExact
@@ -142,6 +116,64 @@ func executeScan(ctx context.Context, req apiv1.Request, result apiv1.Result) ap
 		partialReason = strings.Join(built.PartialReasons, "; ")
 	}
 
+	indexPath, err := repository.IndexPath(ctx, before.Root)
+	if err != nil {
+		result.Error = &apiv1.APIError{
+			Code:    "INDEX_PATH_FAILED",
+			Message: err.Error(),
+		}
+		return result
+	}
+
+	storedSources := make([]store.Source, 0, len(built.Sources))
+	apiSources := make([]apiv1.Source, 0, len(built.Sources))
+	for _, source := range built.Sources {
+		storedSources = append(storedSources, store.Source{
+			Path:        source.Path,
+			Kind:        string(source.Kind),
+			Executable:  source.Executable,
+			ContentHash: source.ContentHash,
+			Size:        source.Size,
+		})
+		apiSources = append(apiSources, apiv1.Source{
+			Path:        source.Path,
+			Kind:        apiv1.SourceKind(source.Kind),
+			Executable:  source.Executable,
+			ContentHash: source.ContentHash,
+			Size:        source.Size,
+		})
+	}
+
+	if err := store.Save(ctx, indexPath, store.Index{
+		SnapshotID:           built.ID,
+		BaseCommit:           before.Commit,
+		WorkspaceFingerprint: before.WorkspaceFingerprint,
+		State:                string(indexState),
+		PartialReason:        partialReason,
+		Sources:              storedSources,
+	}); err != nil {
+		result.Error = &apiv1.APIError{
+			Code:    "INDEX_WRITE_FAILED",
+			Message: err.Error(),
+		}
+		return result
+	}
+
+	afterPersist, err := inspectRepository(ctx, before.Root)
+	if err != nil {
+		return repositoryInspectionError(result, err)
+	}
+	if !repository.SameIdentity(before, afterPersist) {
+		result.Index = apiv1.IndexInfo{
+			State:         apiv1.IndexStale,
+			SnapshotID:    built.ID,
+			BaseCommit:    before.Commit,
+			Fingerprint:   before.WorkspaceFingerprint,
+			PartialReason: partialReason,
+		}
+		return workspaceChangedResult(result, req.Repository.ID, afterPersist, true)
+	}
+
 	result.Index = apiv1.IndexInfo{
 		State:         indexState,
 		SnapshotID:    built.ID,
@@ -149,7 +181,114 @@ func executeScan(ctx context.Context, req apiv1.Request, result apiv1.Result) ap
 		Fingerprint:   before.WorkspaceFingerprint,
 		PartialReason: partialReason,
 	}
-	result.Capabilities = []apiv1.Capability{
+	result.Capabilities = scanCapabilities(indexState)
+
+	data, err := json.Marshal(apiv1.ScanData{
+		Snapshot: apiv1.Snapshot{
+			ID:       built.ID,
+			Revision: result.Repository.Revision,
+			Sources:  apiSources,
+		},
+		Warnings: built.PartialReasons,
+	})
+	if err != nil {
+		return internalError(result, err)
+	}
+	result.Data = data
+	return result
+}
+
+func persistedIndexStatus(ctx context.Context, state repository.State) (apiv1.IndexInfo, []apiv1.Capability) {
+	baseCapabilities := []apiv1.Capability{
+		{
+			Name:       "repository.identity",
+			Available:  true,
+			Resolution: "exact",
+		},
+		{
+			Name:       "index.persistence",
+			Available:  true,
+			Resolution: "sqlite",
+		},
+	}
+
+	indexPath, err := repository.IndexPath(ctx, state.Root)
+	if err != nil {
+		info := apiv1.IndexInfo{
+			State:         apiv1.IndexInvalid,
+			PartialReason: err.Error(),
+		}
+		return info, append(baseCapabilities, apiv1.Capability{
+			Name:      "index.current",
+			Available: false,
+			Reason:    err.Error(),
+		})
+	}
+
+	persisted, err := store.Load(ctx, indexPath)
+	if errors.Is(err, store.ErrNotFound) {
+		return apiv1.IndexInfo{State: apiv1.IndexAbsent}, append(baseCapabilities, apiv1.Capability{
+			Name:      "index.current",
+			Available: false,
+			Reason:    "no persisted snapshot",
+		})
+	}
+	if err != nil {
+		info := apiv1.IndexInfo{
+			State:         apiv1.IndexInvalid,
+			PartialReason: err.Error(),
+		}
+		return info, append(baseCapabilities, apiv1.Capability{
+			Name:      "index.current",
+			Available: false,
+			Reason:    err.Error(),
+		})
+	}
+
+	storedState := apiv1.IndexState(persisted.State)
+	if storedState != apiv1.IndexExact && storedState != apiv1.IndexPartial {
+		reason := fmt.Sprintf("unsupported persisted index state %q", persisted.State)
+		info := apiv1.IndexInfo{
+			State:         apiv1.IndexInvalid,
+			SnapshotID:    persisted.SnapshotID,
+			BaseCommit:    persisted.BaseCommit,
+			Fingerprint:   persisted.WorkspaceFingerprint,
+			PartialReason: reason,
+		}
+		return info, append(baseCapabilities, apiv1.Capability{
+			Name:      "index.current",
+			Available: false,
+			Reason:    reason,
+		})
+	}
+
+	info := apiv1.IndexInfo{
+		State:         storedState,
+		SnapshotID:    persisted.SnapshotID,
+		BaseCommit:    persisted.BaseCommit,
+		Fingerprint:   persisted.WorkspaceFingerprint,
+		PartialReason: persisted.PartialReason,
+	}
+	if persisted.BaseCommit != state.Commit ||
+		persisted.WorkspaceFingerprint != state.WorkspaceFingerprint {
+		info.State = apiv1.IndexStale
+		return info, append(baseCapabilities, apiv1.Capability{
+			Name:       "index.current",
+			Available:  false,
+			Resolution: "stale",
+			Reason:     "persisted snapshot does not match the observed repository identity",
+		})
+	}
+
+	return info, append(baseCapabilities, apiv1.Capability{
+		Name:       "index.current",
+		Available:  true,
+		Resolution: strings.ToLower(string(storedState)),
+	})
+}
+
+func scanCapabilities(indexState apiv1.IndexState) []apiv1.Capability {
+	return []apiv1.Capability{
 		{
 			Name:       "repository.identity",
 			Available:  true,
@@ -165,20 +304,35 @@ func executeScan(ctx context.Context, req apiv1.Request, result apiv1.Result) ap
 			Available:  true,
 			Resolution: strings.ToLower(string(indexState)),
 		},
-	}
-
-	data, err := json.Marshal(apiv1.ScanData{
-		Snapshot: apiv1.Snapshot{
-			ID:       built.ID,
-			Revision: result.Repository.Revision,
-			Sources:  apiSources,
+		{
+			Name:       "index.persistence",
+			Available:  true,
+			Resolution: "sqlite",
 		},
-		Warnings: built.PartialReasons,
-	})
-	if err != nil {
-		return internalError(result, err)
+		{
+			Name:       "index.current",
+			Available:  true,
+			Resolution: strings.ToLower(string(indexState)),
+		},
 	}
-	result.Data = data
+}
+
+func workspaceChangedResult(
+	result apiv1.Result,
+	repositoryID string,
+	state repository.State,
+	persisted bool,
+) apiv1.Result {
+	result.Repository = observedRepository(repositoryID, state)
+	message := "repository identity changed while the snapshot was being built"
+	if persisted {
+		message = "repository identity changed while the snapshot was being persisted"
+	}
+	result.Error = &apiv1.APIError{
+		Code:      "WORKSPACE_CHANGED_DURING_SCAN",
+		Message:   message,
+		Retryable: true,
+	}
 	return result
 }
 

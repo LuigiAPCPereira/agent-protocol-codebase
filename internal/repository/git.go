@@ -69,6 +69,22 @@ func Inspect(ctx context.Context, dir string) (State, error) {
 	}, nil
 }
 
+func IndexPath(ctx context.Context, root string) (string, error) {
+	out, err := git(ctx, root, "rev-parse", "--git-path", "agent-protocol/codebase.sqlite3")
+	if err != nil {
+		return "", fmt.Errorf("resolve codebase index path: %w", err)
+	}
+
+	path := strings.TrimSpace(string(out))
+	if path == "" {
+		return "", fmt.Errorf("resolve codebase index path: empty path")
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, filepath.FromSlash(path))
+	}
+	return filepath.Clean(path), nil
+}
+
 func ListVisibleEntries(ctx context.Context, root string) ([]Entry, error) {
 	trackedOut, err := git(ctx, root, "ls-files", "--stage", "-z")
 	if err != nil {

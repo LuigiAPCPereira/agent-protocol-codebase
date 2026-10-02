@@ -39,11 +39,16 @@ Schema v1 reserves these operations:
 - `impact`
 - `diff`
 
-The current tracer slices implement `status` and `scan`.
+The current tracer slices implement `status`, `scan`, and local snapshot persistence.
 
 ### status
 
-`status` observes the Git root/HEAD, whether the worktree is dirty, and a deterministic SHA-256 fingerprint for tracked and untracked workspace changes. It does not execute project code.
+`status` observes the Git root/HEAD, whether the worktree is dirty, and a deterministic SHA-256 fingerprint for tracked and untracked workspace changes. It also compares that identity with the latest persisted snapshot and reports:
+
+- `ABSENT` when no local index exists;
+- `EXACT` or `PARTIAL` when the persisted snapshot matches the observed repository identity;
+- `STALE` when the repository has changed since the persisted snapshot;
+- `INVALID` when the local cache cannot be interpreted safely.
 
 ### scan
 
@@ -60,9 +65,19 @@ The current tracer slices implement `status` and `scan`.
 
 Ignored files are outside the source universe. Unsupported source kinds are omitted and make the scan `PARTIAL` rather than silently pretending completeness.
 
-The engine observes repository identity before and after scanning. If the worktree changes during the read, the operation fails with `WORKSPACE_CHANGED_DURING_SCAN` instead of returning a false `EXACT` snapshot.
+The engine observes repository identity before reading and again before and after persistence. If the worktree changes during the operation, it fails with `WORKSPACE_CHANGED_DURING_SCAN`; a snapshot already persisted in that race is subsequently observed as `STALE`.
 
-Snapshots are currently returned in the result only; persistence is not implemented yet. Therefore a later `status` still reports the persistent index as `ABSENT`.
+### persistence
+
+The current snapshot is stored in SQLite under the Git metadata area resolved by:
+
+```text
+git rev-parse --git-path agent-protocol/codebase.sqlite3
+```
+
+That keeps derived data out of the versioned worktree and naturally separates linked worktrees. The database is a disposable cache, not project truth.
+
+The SQLite implementation is isolated behind `internal/store`. The current driver is `github.com/ncruces/go-sqlite3`, chosen because it is CGO-free and compatible with the Go 1.26 portability baseline.
 
 ## Evidence model
 
@@ -72,7 +87,7 @@ Results carry enough metadata for an agent to reason about what was actually obs
 - dirty/clean worktree state;
 - workspace fingerprint when dirty;
 - engine and schema version;
-- snapshot/index state;
+- persisted snapshot/index state;
 - declared capabilities;
 - structured API errors.
 
@@ -82,16 +97,15 @@ The derived snapshot/index is evidence acceleration, not repository truth. Code,
 
 ## Safety defaults
 
-The engine is read-only by default and does not assume permission to:
+The engine does not execute project code and does not assume permission to:
 
-- execute project code;
 - install project dependencies;
 - run lifecycle scripts;
 - access secrets;
-- use the network;
-- write to the repository.
+- use the network during repository analysis;
+- write to the versioned worktree.
 
-Those capabilities must be explicit at execution boundaries.
+`scan` does write its derived SQLite cache into Git metadata. Execution providers may substitute an ephemeral or remote persistence strategy later without changing the Codebase API.
 
 ## Development
 

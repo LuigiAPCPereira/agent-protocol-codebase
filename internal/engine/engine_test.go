@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	apiv1 "github.com/LuigiAPCPereira/agent-protocol-codebase/api/v1"
+	"github.com/LuigiAPCPereira/agent-protocol-codebase/internal/repository"
 )
 
 func TestExecuteStatusReturnsObservedRevision(t *testing.T) {
@@ -56,34 +57,15 @@ func TestExecuteStatusDetectsRevisionMismatch(t *testing.T) {
 	}
 }
 
-func TestExecuteScanReturnsExactSnapshot(t *testing.T) {
+func TestExecuteScanPersistsExactIndex(t *testing.T) {
 	repo := newGitRepository(t)
 	ctx := context.Background()
 
-	status := Execute(ctx, apiv1.Request{
-		SchemaVersion: apiv1.SchemaVersion,
-		RequestID:     "discover",
-		Operation:     apiv1.OperationStatus,
-		Repository:    apiv1.Repository{Root: repo},
-	})
-	if status.Error != nil {
-		t.Fatalf("status error: %+v", status.Error)
-	}
+	discovered := status(t, ctx, repo)
+	result := scan(t, ctx, repo, discovered.Repository.Revision)
 
-	result := Execute(ctx, apiv1.Request{
-		SchemaVersion: apiv1.SchemaVersion,
-		RequestID:     "scan-test",
-		Operation:     apiv1.OperationScan,
-		Repository: apiv1.Repository{
-			Root:     repo,
-			Revision: status.Repository.Revision,
-		},
-	})
-	if result.Error != nil {
-		t.Fatalf("scan error: %+v", result.Error)
-	}
 	if result.Index.State != apiv1.IndexExact {
-		t.Fatalf("index state = %q, want %q", result.Index.State, apiv1.IndexExact)
+		t.Fatalf("scan index state = %q, want %q", result.Index.State, apiv1.IndexExact)
 	}
 	if !strings.HasPrefix(result.Index.SnapshotID, "sha256:") {
 		t.Fatalf("snapshot ID = %q, want sha256 prefix", result.Index.SnapshotID)
@@ -99,8 +81,41 @@ func TestExecuteScanReturnsExactSnapshot(t *testing.T) {
 	if len(data.Snapshot.Sources) != 1 || data.Snapshot.Sources[0].Path != "tracked.txt" {
 		t.Fatalf("unexpected sources: %+v", data.Snapshot.Sources)
 	}
-	if !strings.HasPrefix(data.Snapshot.Sources[0].ContentHash, "sha256:") {
-		t.Fatalf("content hash = %q, want sha256 prefix", data.Snapshot.Sources[0].ContentHash)
+
+	after := status(t, ctx, repo)
+	if after.Index.State != apiv1.IndexExact {
+		t.Fatalf("persisted index state = %q, want EXACT", after.Index.State)
+	}
+	if after.Index.SnapshotID != result.Index.SnapshotID {
+		t.Fatalf("persisted snapshot = %q, want %q", after.Index.SnapshotID, result.Index.SnapshotID)
+	}
+
+	indexPath, err := repository.IndexPath(ctx, repo)
+	if err != nil {
+		t.Fatalf("resolve index path: %v", err)
+	}
+	if _, err := os.Stat(indexPath); err != nil {
+		t.Fatalf("stat persisted index: %v", err)
+	}
+}
+
+func TestExecuteStatusReportsStaleAfterWorkspaceChange(t *testing.T) {
+	repo := newGitRepository(t)
+	ctx := context.Background()
+
+	discovered := status(t, ctx, repo)
+	scanResult := scan(t, ctx, repo, discovered.Repository.Revision)
+
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatalf("modify tracked file: %v", err)
+	}
+
+	after := status(t, ctx, repo)
+	if after.Index.State != apiv1.IndexStale {
+		t.Fatalf("index state = %q, want STALE", after.Index.State)
+	}
+	if after.Index.SnapshotID != scanResult.Index.SnapshotID {
+		t.Fatalf("stale status lost snapshot identity: got %q want %q", after.Index.SnapshotID, scanResult.Index.SnapshotID)
 	}
 }
 
@@ -108,15 +123,7 @@ func TestExecuteScanRequiresDirtyWorkspaceFingerprint(t *testing.T) {
 	repo := newGitRepository(t)
 	ctx := context.Background()
 
-	cleanStatus := Execute(ctx, apiv1.Request{
-		SchemaVersion: apiv1.SchemaVersion,
-		RequestID:     "discover",
-		Operation:     apiv1.OperationStatus,
-		Repository:    apiv1.Repository{Root: repo},
-	})
-	if cleanStatus.Error != nil {
-		t.Fatalf("status error: %+v", cleanStatus.Error)
-	}
+	cleanStatus := status(t, ctx, repo)
 
 	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("changed\n"), 0o644); err != nil {
 		t.Fatalf("modify tracked file: %v", err)
@@ -146,34 +153,52 @@ func TestExecuteScanAcceptsExactDirtyFingerprint(t *testing.T) {
 		t.Fatalf("modify tracked file: %v", err)
 	}
 
-	status := Execute(ctx, apiv1.Request{
+	discovered := status(t, ctx, repo)
+	if !discovered.Repository.Revision.Dirty ||
+		discovered.Repository.Revision.WorkspaceFingerprint == "" {
+		t.Fatalf("expected exact dirty identity, got %+v", discovered.Repository.Revision)
+	}
+
+	result := scan(t, ctx, repo, discovered.Repository.Revision)
+	if result.Index.State != apiv1.IndexExact {
+		t.Fatalf("scan index state = %q, want EXACT", result.Index.State)
+	}
+
+	after := status(t, ctx, repo)
+	if after.Index.State != apiv1.IndexExact {
+		t.Fatalf("persisted dirty index state = %q, want EXACT", after.Index.State)
+	}
+}
+
+func status(t *testing.T, ctx context.Context, repo string) apiv1.Result {
+	t.Helper()
+	result := Execute(ctx, apiv1.Request{
 		SchemaVersion: apiv1.SchemaVersion,
-		RequestID:     "discover-dirty",
+		RequestID:     "status-helper",
 		Operation:     apiv1.OperationStatus,
 		Repository:    apiv1.Repository{Root: repo},
 	})
-	if status.Error != nil {
-		t.Fatalf("status error: %+v", status.Error)
+	if result.Error != nil {
+		t.Fatalf("status error: %+v", result.Error)
 	}
-	if !status.Repository.Revision.Dirty || status.Repository.Revision.WorkspaceFingerprint == "" {
-		t.Fatalf("expected exact dirty identity, got %+v", status.Repository.Revision)
-	}
+	return result
+}
 
+func scan(t *testing.T, ctx context.Context, repo string, revision apiv1.Revision) apiv1.Result {
+	t.Helper()
 	result := Execute(ctx, apiv1.Request{
 		SchemaVersion: apiv1.SchemaVersion,
-		RequestID:     "scan-dirty",
+		RequestID:     "scan-helper",
 		Operation:     apiv1.OperationScan,
 		Repository: apiv1.Repository{
 			Root:     repo,
-			Revision: status.Repository.Revision,
+			Revision: revision,
 		},
 	})
 	if result.Error != nil {
 		t.Fatalf("scan error: %+v", result.Error)
 	}
-	if result.Index.State != apiv1.IndexExact {
-		t.Fatalf("index state = %q, want EXACT", result.Index.State)
-	}
+	return result
 }
 
 func newGitRepository(t *testing.T) string {
