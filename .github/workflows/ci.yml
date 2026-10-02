@@ -34,3 +34,6 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      - name: Codebase benchmark tracer
+        run: go run ./cmd/ap-codebase-bench-smoke benchmarks/v1/tasks.json benchmarks/v1/fixture

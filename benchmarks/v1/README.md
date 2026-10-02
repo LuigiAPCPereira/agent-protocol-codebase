@@ -82,3 +82,22 @@ The benchmark starts with three questions:
 
 The initial suite is intentionally small. Expand only after these measurements
 are reliable and sensitive to known-bad submissions.
+
+
+## Mechanical tracer
+
+`ap-codebase-bench-smoke` is a deterministic Codebase-arm tracer. It creates an
+isolated Git repository from the fixture, runs `status` + `scan`, executes the
+three benchmark tasks through Codebase API operations, normalizes the resulting
+facts, and scores them with the same scorer.
+
+The fixture commit uses fixed author/committer dates so identical fixture content
+produces a stable repository revision.
+
+This tracer is **not** the raw-vs-Codebase agent benchmark. It exists to prove
+that the Codebase arm and scorer compose correctly before spending evaluation
+budget on isolated agent runs.
+
+A raw agent run is invalid when the evaluating context has already seen the
+fixture layout or expected facts. Use a fresh isolated context for each arm and
+task family, with no transcript or intermediate-output leakage.
