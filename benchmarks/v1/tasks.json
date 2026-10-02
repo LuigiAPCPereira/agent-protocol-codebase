@@ -1,0 +1,30 @@
+{
+  "benchmark_version": 1,
+  "fixture_id": "codebase-bench-v1-fixture-1",
+  "fixture": "fixture",
+  "tasks": [
+    {
+      "id": "locate-service",
+      "prompt": "Locate the declaration of type Service in package example.com/bench/lib. Return only facts supported by the repository.",
+      "expected_facts": [
+        "declares|lib/service.go|example.com/bench/lib.Service"
+      ]
+    },
+    {
+      "id": "direct-importer",
+      "prompt": "Which project package directly imports example.com/bench/lib?",
+      "expected_facts": [
+        "imports|example.com/bench/app|example.com/bench/lib"
+      ]
+    },
+    {
+      "id": "structural-chain",
+      "prompt": "Starting from example.com/bench/lib.Service, identify the structural dependency chain up to the project package that imports lib. This is structural reachability, not a claim that code will break.",
+      "expected_facts": [
+        "declares|lib/service.go|example.com/bench/lib.Service",
+        "contains|example.com/bench/lib|lib/service.go",
+        "imports|example.com/bench/app|example.com/bench/lib"
+      ]
+    }
+  ]
+}
