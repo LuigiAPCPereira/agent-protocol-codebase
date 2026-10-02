@@ -135,3 +135,50 @@ For a valid comparative run, create a fresh context for each arm. Give that
 context the same fixture revision and the same blind prompt, but never
 `tasks.json`, scorer output, another arm's transcript, discovered paths, or
 previous answers.
+
+
+## Verified comparison submissions
+
+Fresh external agent runs should be saved as submission envelopes rather than
+plain scorer runs.
+
+A submission contains:
+
+- the normal benchmark run;
+- the canonical blind-bundle digest;
+- the canonical fixture digest;
+- a fresh-context identifier;
+- isolation attestations recording whether evaluator material or another arm's
+  output was visible.
+
+Generate the canonical identities with:
+
+```sh
+go run ./cmd/ap-codebase-bench-identity \
+  benchmarks/v1/prompts.json \
+  benchmarks/v1/fixture
+```
+
+Then compare two fresh submissions for the same task with:
+
+```sh
+go run ./cmd/ap-codebase-bench-compare \
+  benchmarks/v1/tasks.json \
+  benchmarks/v1/prompts.json \
+  benchmarks/v1/fixture \
+  raw.json \
+  codebase.json
+```
+
+The comparator fails closed when the bundle or fixture digests differ, when the
+repository revisions differ, when both runs claim the same context, when both
+runs use the same arm, or when the isolation attestation reports evaluator/oracle
+or other-arm leakage.
+
+The isolation fields are attestations, not cryptographic proof of a fresh model
+context. They prevent accidental invalid comparisons and make contamination
+explicit in durable evidence. A trusted harness still owns actual process/model
+isolation.
+
+The comparison output deliberately contains both scored arms and no synthetic
+winner field. Correctness and cost remain separate evidence axes.
