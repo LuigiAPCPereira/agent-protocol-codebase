@@ -16,13 +16,13 @@ import (
 )
 
 type SmokeReport struct {
-	BenchmarkVersion int     `json:"benchmark_version"`
-	FixtureID        string  `json:"fixture_id"`
-	Arm              string  `json:"arm"`
-	RepositoryRevision string `json:"repository_revision"`
-	Setup            Setup   `json:"setup"`
-	Scores           []Score `json:"scores"`
-	Notes            []string `json:"notes"`
+	BenchmarkVersion    int      `json:"benchmark_version"`
+	FixtureID           string   `json:"fixture_id"`
+	Arm                 string   `json:"arm"`
+	RepositoryRevision string   `json:"repository_revision"`
+	Setup               Setup    `json:"setup"`
+	Scores              []Score  `json:"scores"`
+	Notes               []string `json:"notes"`
 }
 
 type Setup struct {
@@ -66,9 +66,9 @@ func RunCodebaseSmoke(ctx context.Context, manifest Manifest, fixtureDir string)
 	}
 
 	report := SmokeReport{
-		BenchmarkVersion: manifest.BenchmarkVersion,
-		FixtureID:        manifest.FixtureID,
-		Arm:              "codebase",
+		BenchmarkVersion:    manifest.BenchmarkVersion,
+		FixtureID:           manifest.FixtureID,
+		Arm:                 "codebase",
 		RepositoryRevision: status.Repository.Revision.Commit,
 		Setup: Setup{
 			APICalls:  2,
