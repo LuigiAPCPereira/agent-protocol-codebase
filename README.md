@@ -39,23 +39,29 @@ Schema v1 reserves these operations:
 - `impact`
 - `diff`
 
-Only the contract foundation is implemented in the first slice. Parsing, persistence, graph traversal, language adapters, and remote execution providers come later.
+The current tracer slice implements `status`: it observes the Git root/HEAD, whether the worktree is dirty, and a deterministic SHA-256 fingerprint for tracked and untracked workspace changes. No project code or lifecycle scripts are executed.
+
+The structural index is not implemented yet, so `status` currently reports `ABSENT`.
 
 ## Evidence model
 
-Results are expected to carry enough metadata for an agent to reason about what was actually observed:
+Results carry enough metadata for an agent to reason about what was actually observed:
 
-- exact repository/workspace identity;
+- exact Git commit;
+- dirty/clean worktree state;
+- workspace fingerprint when dirty;
 - engine and schema version;
 - index freshness;
 - declared capabilities;
-- provenance/resolution information for structural facts.
+- structured API errors.
+
+A request may include an expected commit or workspace fingerprint. `status` returns a structured mismatch instead of pretending a different workspace is equivalent.
 
 The derived index is evidence acceleration, not repository truth. Code, Git state, tests, and runtime observations remain authoritative.
 
 ## Safety defaults
 
-The future engine should remain read-only by default and must not assume permission to:
+The engine is read-only by default and does not assume permission to:
 
 - execute project code;
 - install project dependencies;
@@ -73,11 +79,19 @@ Requires Go 1.26 or newer.
 ```bash
 go test ./...
 go run ./cmd/ap-codebase version --json
+go run ./cmd/ap-codebase status --json
 ```
 
-Validate a request envelope:
+The generic Codebase API execution seam accepts a request envelope on stdin:
 
 ```bash
-printf '%s\n' '{"schema_version":1,"request_id":"example","operation":"status","repository":{"revision":{"commit":"abc123"}}}' \
+printf '%s\n' '{"schema_version":1,"request_id":"example","operation":"status","repository":{"root":"."}}' \
+  | go run ./cmd/ap-codebase execute
+```
+
+Validate an envelope without executing it:
+
+```bash
+printf '%s\n' '{"schema_version":1,"request_id":"example","operation":"status","repository":{"root":"."}}' \
   | go run ./cmd/ap-codebase validate-request
 ```

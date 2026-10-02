@@ -65,11 +65,36 @@ func TestValidateRequestRejectsUnknownOperation(t *testing.T) {
 	}
 }
 
+func TestValidateStatusAllowsDiscoveryWithoutExpectedRevision(t *testing.T) {
+	req := Request{
+		SchemaVersion: SchemaVersion,
+		RequestID:     "cb-status",
+		Operation:     OperationStatus,
+		Repository:    Repository{Root: "."},
+	}
+
+	if err := ValidateRequest(req); err != nil {
+		t.Fatalf("validate status request: %v", err)
+	}
+}
+
+func TestValidateNonStatusRequiresRevisionIdentity(t *testing.T) {
+	req := Request{
+		SchemaVersion: SchemaVersion,
+		RequestID:     "cb-query",
+		Operation:     OperationQuery,
+	}
+
+	if err := ValidateRequest(req); err == nil {
+		t.Fatal("expected missing revision identity to fail")
+	}
+}
+
 func TestValidateRequestAllowsWorkspaceOnlyIdentity(t *testing.T) {
 	req := Request{
 		SchemaVersion: SchemaVersion,
 		RequestID:     "cb-dirty",
-		Operation:     OperationStatus,
+		Operation:     OperationQuery,
 		Repository: Repository{
 			Revision: Revision{
 				Dirty:                true,

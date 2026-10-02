@@ -69,6 +69,7 @@ type Request struct {
 type IndexState string
 
 const (
+	IndexAbsent  IndexState = "ABSENT"
 	IndexExact   IndexState = "EXACT"
 	IndexPartial IndexState = "PARTIAL"
 	IndexStale   IndexState = "STALE"
@@ -121,7 +122,9 @@ func ValidateRequest(req Request) error {
 	if !req.Operation.Valid() {
 		return fmt.Errorf("unsupported operation %q", req.Operation)
 	}
-	if req.Repository.Revision.Commit == "" && req.Repository.Revision.WorkspaceFingerprint == "" {
+	if req.Operation != OperationStatus &&
+		req.Repository.Revision.Commit == "" &&
+		req.Repository.Revision.WorkspaceFingerprint == "" {
 		return errors.New("repository revision requires commit or workspace_fingerprint")
 	}
 
