@@ -21,6 +21,12 @@ type State struct {
 	WorkspaceFingerprint string
 }
 
+type Entry struct {
+	Path    string
+	Tracked bool
+	GitMode string
+}
+
 func Inspect(ctx context.Context, dir string) (State, error) {
 	if dir == "" {
 		dir = "."
@@ -61,6 +67,60 @@ func Inspect(ctx context.Context, dir string) (State, error) {
 		Dirty:                true,
 		WorkspaceFingerprint: fingerprint,
 	}, nil
+}
+
+func ListVisibleEntries(ctx context.Context, root string) ([]Entry, error) {
+	trackedOut, err := git(ctx, root, "ls-files", "--stage", "-z")
+	if err != nil {
+		return nil, fmt.Errorf("list tracked repository files: %w", err)
+	}
+	untrackedOut, err := git(ctx, root, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, fmt.Errorf("list untracked repository files: %w", err)
+	}
+
+	byPath := make(map[string]Entry)
+	for _, record := range bytes.Split(trackedOut, []byte{0}) {
+		if len(record) == 0 {
+			continue
+		}
+		tab := bytes.IndexByte(record, '\t')
+		if tab < 0 {
+			return nil, fmt.Errorf("parse git index entry %q: missing path separator", string(record))
+		}
+		fields := strings.Fields(string(record[:tab]))
+		if len(fields) < 3 {
+			return nil, fmt.Errorf("parse git index entry %q: malformed metadata", string(record[:tab]))
+		}
+		path := string(record[tab+1:])
+		byPath[path] = Entry{
+			Path:    path,
+			Tracked: true,
+			GitMode: fields[0],
+		}
+	}
+
+	for _, path := range splitNUL(untrackedOut) {
+		if _, exists := byPath[path]; exists {
+			continue
+		}
+		byPath[path] = Entry{Path: path}
+	}
+
+	entries := make([]Entry, 0, len(byPath))
+	for _, entry := range byPath {
+		entries = append(entries, entry)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Path < entries[j].Path
+	})
+	return entries, nil
+}
+
+func SameIdentity(a, b State) bool {
+	return a.Commit == b.Commit &&
+		a.Dirty == b.Dirty &&
+		a.WorkspaceFingerprint == b.WorkspaceFingerprint
 }
 
 func fingerprintWorkspace(ctx context.Context, root, commit string, status []byte) (string, error) {

@@ -36,6 +36,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "scan":
+		if err := runScan(context.Background(), os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
 		usage(os.Stderr)
@@ -129,10 +134,66 @@ func runStatus(ctx context.Context, args []string, w io.Writer) error {
 	return nil
 }
 
+func runScan(ctx context.Context, args []string, w io.Writer) error {
+	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	repo := fs.String("repo", ".", "repository path")
+	jsonOutput := fs.Bool("json", false, "emit Codebase API JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("scan does not accept positional arguments")
+	}
+
+	status := engine.Execute(ctx, apiv1.Request{
+		SchemaVersion: apiv1.SchemaVersion,
+		RequestID:     "cli-scan-discover",
+		Operation:     apiv1.OperationStatus,
+		Repository:    apiv1.Repository{Root: *repo},
+	})
+	if status.Error != nil {
+		return fmt.Errorf("%s: %s", status.Error.Code, status.Error.Message)
+	}
+
+	result := engine.Execute(ctx, apiv1.Request{
+		SchemaVersion: apiv1.SchemaVersion,
+		RequestID:     "cli-scan",
+		Operation:     apiv1.OperationScan,
+		Repository: apiv1.Repository{
+			Root:     *repo,
+			Revision: status.Repository.Revision,
+		},
+	})
+	if result.Error != nil {
+		return fmt.Errorf("%s: %s", result.Error.Code, result.Error.Message)
+	}
+
+	if *jsonOutput {
+		return json.NewEncoder(w).Encode(result)
+	}
+
+	var data apiv1.ScanData
+	if err := json.Unmarshal(result.Data, &data); err != nil {
+		return fmt.Errorf("decode scan result: %w", err)
+	}
+
+	fmt.Fprintf(w, "snapshot: %s\n", data.Snapshot.ID)
+	fmt.Fprintf(w, "commit: %s\n", data.Snapshot.Revision.Commit)
+	fmt.Fprintf(w, "dirty: %t\n", data.Snapshot.Revision.Dirty)
+	fmt.Fprintf(w, "sources: %d\n", len(data.Snapshot.Sources))
+	fmt.Fprintf(w, "index: %s\n", result.Index.State)
+	if result.Index.PartialReason != "" {
+		fmt.Fprintf(w, "partial_reason: %s\n", result.Index.PartialReason)
+	}
+	return nil
+}
+
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage:")
 	fmt.Fprintln(w, "  ap-codebase version [--json]")
 	fmt.Fprintln(w, "  ap-codebase validate-request < request.json")
 	fmt.Fprintln(w, "  ap-codebase execute < request.json")
 	fmt.Fprintln(w, "  ap-codebase status [--repo PATH] [--json]")
+	fmt.Fprintln(w, "  ap-codebase scan [--repo PATH] [--json]")
 }

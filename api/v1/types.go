@@ -90,9 +90,36 @@ type Capability struct {
 
 type IndexInfo struct {
 	State         IndexState `json:"state"`
+	SnapshotID    string     `json:"snapshot_id,omitempty"`
 	BaseCommit    string     `json:"base_commit,omitempty"`
 	Fingerprint   string     `json:"workspace_fingerprint,omitempty"`
 	PartialReason string     `json:"partial_reason,omitempty"`
+}
+
+type SourceKind string
+
+const (
+	SourceRegular SourceKind = "regular"
+	SourceSymlink SourceKind = "symlink"
+)
+
+type Source struct {
+	Path        string     `json:"path"`
+	Kind        SourceKind `json:"kind"`
+	Executable  bool       `json:"executable,omitempty"`
+	ContentHash string     `json:"content_hash"`
+	Size        int64      `json:"size"`
+}
+
+type Snapshot struct {
+	ID       string   `json:"id"`
+	Revision Revision `json:"revision"`
+	Sources  []Source `json:"sources"`
+}
+
+type ScanData struct {
+	Snapshot Snapshot `json:"snapshot"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type APIError struct {
@@ -126,6 +153,9 @@ func ValidateRequest(req Request) error {
 		req.Repository.Revision.Commit == "" &&
 		req.Repository.Revision.WorkspaceFingerprint == "" {
 		return errors.New("repository revision requires commit or workspace_fingerprint")
+	}
+	if req.Repository.Revision.Dirty && req.Repository.Revision.WorkspaceFingerprint == "" {
+		return errors.New("dirty repository revision requires workspace_fingerprint")
 	}
 
 	switch req.Requirements.Semantic {

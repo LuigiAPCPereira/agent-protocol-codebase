@@ -90,6 +90,24 @@ func TestValidateNonStatusRequiresRevisionIdentity(t *testing.T) {
 	}
 }
 
+func TestValidateDirtyRevisionRequiresFingerprint(t *testing.T) {
+	req := Request{
+		SchemaVersion: SchemaVersion,
+		RequestID:     "cb-scan",
+		Operation:     OperationScan,
+		Repository: Repository{
+			Revision: Revision{
+				Commit: "abc123",
+				Dirty:  true,
+			},
+		},
+	}
+
+	if err := ValidateRequest(req); err == nil {
+		t.Fatal("expected dirty revision without fingerprint to fail")
+	}
+}
+
 func TestValidateRequestAllowsWorkspaceOnlyIdentity(t *testing.T) {
 	req := Request{
 		SchemaVersion: SchemaVersion,
