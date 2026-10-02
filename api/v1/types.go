@@ -88,10 +88,10 @@ type Capability struct {
 }
 
 type IndexInfo struct {
-	State        IndexState `json:"state"`
-	BaseCommit   string     `json:"base_commit,omitempty"`
-	Fingerprint  string     `json:"workspace_fingerprint,omitempty"`
-	PartialReason string    `json:"partial_reason,omitempty"`
+	State         IndexState `json:"state"`
+	BaseCommit    string     `json:"base_commit,omitempty"`
+	Fingerprint   string     `json:"workspace_fingerprint,omitempty"`
+	PartialReason string     `json:"partial_reason,omitempty"`
 }
 
 type APIError struct {
@@ -106,7 +106,7 @@ type Result struct {
 	Engine        EngineInfo      `json:"engine"`
 	Repository    Repository      `json:"repository"`
 	Index         IndexInfo       `json:"index"`
-	Capabilities []Capability    `json:"capabilities,omitempty"`
+	Capabilities  []Capability    `json:"capabilities,omitempty"`
 	Data          json.RawMessage `json:"result,omitempty"`
 	Error         *APIError       `json:"error,omitempty"`
 }
