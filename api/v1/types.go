@@ -243,13 +243,13 @@ type GraphEdgeDiff struct {
 }
 
 type DiffData struct {
-	BaseSnapshotID string        `json:"base_snapshot_id"`
-	HeadSnapshotID string        `json:"head_snapshot_id"`
-	AnalysisVersion int          `json:"analysis_version"`
-	Sources        SourceDiff    `json:"sources"`
-	Nodes          GraphNodeDiff `json:"nodes"`
-	Edges          GraphEdgeDiff `json:"edges"`
-	Truncated      bool          `json:"truncated,omitempty"`
+	BaseSnapshotID  string        `json:"base_snapshot_id"`
+	HeadSnapshotID  string        `json:"head_snapshot_id"`
+	AnalysisVersion int           `json:"analysis_version"`
+	Sources         SourceDiff    `json:"sources"`
+	Nodes           GraphNodeDiff `json:"nodes"`
+	Edges           GraphEdgeDiff `json:"edges"`
+	Truncated       bool          `json:"truncated,omitempty"`
 }
 
 type ScanData struct {
