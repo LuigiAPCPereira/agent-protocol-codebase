@@ -161,6 +161,21 @@ type QueryData struct {
 	Truncated bool        `json:"truncated,omitempty"`
 }
 
+type PathArguments struct {
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Direction string `json:"direction,omitempty"`
+	MaxDepth  int    `json:"max_depth,omitempty"`
+}
+
+type PathData struct {
+	Found     bool        `json:"found"`
+	Direction string      `json:"direction"`
+	Depth     int         `json:"depth"`
+	Nodes     []GraphNode `json:"nodes"`
+	Edges     []GraphEdge `json:"edges"`
+}
+
 type ScanData struct {
 	Snapshot Snapshot     `json:"snapshot"`
 	Graph    GraphSummary `json:"graph"`
