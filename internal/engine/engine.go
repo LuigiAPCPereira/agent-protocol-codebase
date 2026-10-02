@@ -8,12 +8,17 @@ import (
 	"strings"
 
 	apiv1 "github.com/LuigiAPCPereira/agent-protocol-codebase/api/v1"
+	goadapter "github.com/LuigiAPCPereira/agent-protocol-codebase/internal/adapters/golang"
+	"github.com/LuigiAPCPereira/agent-protocol-codebase/internal/graph"
 	"github.com/LuigiAPCPereira/agent-protocol-codebase/internal/repository"
 	"github.com/LuigiAPCPereira/agent-protocol-codebase/internal/snapshot"
 	"github.com/LuigiAPCPereira/agent-protocol-codebase/internal/store"
 )
 
-const Version = "0.0.0-dev"
+const (
+	Version         = "0.0.0-dev"
+	AnalysisVersion = 1
+)
 
 func Execute(ctx context.Context, req apiv1.Request) apiv1.Result {
 	result := apiv1.Result{
@@ -109,11 +114,35 @@ func executeScan(ctx context.Context, req apiv1.Request, result apiv1.Result) ap
 		return workspaceChangedResult(result, req.Repository.ID, afterRead, false)
 	}
 
+	graphResult := graph.Result{}
+	if req.Requirements.Semantic != apiv1.SemanticOff {
+		graphResult = goadapter.Extract(ctx, before.Root, built.Sources)
+	}
+
+	warnings := append([]string{}, built.PartialReasons...)
+	warnings = append(warnings, graphResult.Warnings...)
 	indexState := apiv1.IndexExact
 	partialReason := ""
-	if len(built.PartialReasons) > 0 {
+	if len(warnings) > 0 {
 		indexState = apiv1.IndexPartial
-		partialReason = strings.Join(built.PartialReasons, "; ")
+		partialReason = strings.Join(warnings, "; ")
+	}
+
+	if req.Requirements.Semantic == apiv1.SemanticRequired &&
+		graphResult.Detected &&
+		(len(graphResult.Nodes) == 0 || len(graphResult.Warnings) > 0) {
+		result.Index = apiv1.IndexInfo{
+			State:         apiv1.IndexPartial,
+			SnapshotID:    built.ID,
+			BaseCommit:    before.Commit,
+			Fingerprint:   before.WorkspaceFingerprint,
+			PartialReason: partialReason,
+		}
+		result.Error = &apiv1.APIError{
+			Code:    "SEMANTIC_REQUIREMENT_UNMET",
+			Message: "Go semantic analysis could not produce complete facts for the requested workspace",
+		}
+		return result
 	}
 
 	indexPath, err := repository.IndexPath(ctx, before.Root)
@@ -150,7 +179,10 @@ func executeScan(ctx context.Context, req apiv1.Request, result apiv1.Result) ap
 		WorkspaceFingerprint: before.WorkspaceFingerprint,
 		State:                string(indexState),
 		PartialReason:        partialReason,
+		AnalysisVersion:      AnalysisVersion,
 		Sources:              storedSources,
+		Nodes:                storeNodes(graphResult.Nodes),
+		Edges:                storeEdges(graphResult.Edges),
 	}); err != nil {
 		result.Error = &apiv1.APIError{
 			Code:    "INDEX_WRITE_FAILED",
@@ -181,15 +213,24 @@ func executeScan(ctx context.Context, req apiv1.Request, result apiv1.Result) ap
 		Fingerprint:   before.WorkspaceFingerprint,
 		PartialReason: partialReason,
 	}
-	result.Capabilities = scanCapabilities(indexState)
+	result.Capabilities = scanCapabilities(indexState, graphResult)
 
+	languages := []string{}
+	if graphResult.Detected && len(graphResult.Nodes) > 0 {
+		languages = append(languages, "go")
+	}
 	data, err := json.Marshal(apiv1.ScanData{
 		Snapshot: apiv1.Snapshot{
 			ID:       built.ID,
 			Revision: result.Repository.Revision,
 			Sources:  apiSources,
 		},
-		Warnings: built.PartialReasons,
+		Graph: apiv1.GraphSummary{
+			Nodes:     len(graphResult.Nodes),
+			Edges:     len(graphResult.Edges),
+			Languages: languages,
+		},
+		Warnings: warnings,
 	})
 	if err != nil {
 		return internalError(result, err)
@@ -269,26 +310,40 @@ func persistedIndexStatus(ctx context.Context, state repository.State) (apiv1.In
 		Fingerprint:   persisted.WorkspaceFingerprint,
 		PartialReason: persisted.PartialReason,
 	}
+
+	if persisted.AnalysisVersion != AnalysisVersion {
+		info.State = apiv1.IndexStale
+		info.PartialReason = appendReason(
+			info.PartialReason,
+			fmt.Sprintf(
+				"analysis version %d does not match current version %d",
+				persisted.AnalysisVersion,
+				AnalysisVersion,
+			),
+		)
+		return info, append(baseCapabilities,
+			indexCurrentCapability(false, "stale", "persisted analysis version is outdated"),
+			graphCapability(persisted, false),
+		)
+	}
+
 	if persisted.BaseCommit != state.Commit ||
 		persisted.WorkspaceFingerprint != state.WorkspaceFingerprint {
 		info.State = apiv1.IndexStale
-		return info, append(baseCapabilities, apiv1.Capability{
-			Name:       "index.current",
-			Available:  false,
-			Resolution: "stale",
-			Reason:     "persisted snapshot does not match the observed repository identity",
-		})
+		return info, append(baseCapabilities,
+			indexCurrentCapability(false, "stale", "persisted snapshot does not match the observed repository identity"),
+			graphCapability(persisted, false),
+		)
 	}
 
-	return info, append(baseCapabilities, apiv1.Capability{
-		Name:       "index.current",
-		Available:  true,
-		Resolution: strings.ToLower(string(storedState)),
-	})
+	return info, append(baseCapabilities,
+		indexCurrentCapability(true, strings.ToLower(string(storedState)), ""),
+		graphCapability(persisted, true),
+	)
 }
 
-func scanCapabilities(indexState apiv1.IndexState) []apiv1.Capability {
-	return []apiv1.Capability{
+func scanCapabilities(indexState apiv1.IndexState, graphResult graph.Result) []apiv1.Capability {
+	capabilities := []apiv1.Capability{
 		{
 			Name:       "repository.identity",
 			Available:  true,
@@ -315,6 +370,97 @@ func scanCapabilities(indexState apiv1.IndexState) []apiv1.Capability {
 			Resolution: strings.ToLower(string(indexState)),
 		},
 	}
+
+	if graphResult.Detected {
+		available := len(graphResult.Nodes) > 0
+		reason := ""
+		if !available {
+			reason = "Go sources were detected but no safe semantic graph facts were produced"
+		} else if len(graphResult.Warnings) > 0 {
+			reason = strings.Join(graphResult.Warnings, "; ")
+		}
+		capabilities = append(capabilities, apiv1.Capability{
+			Name:       "go.semantic",
+			Available:  available,
+			Resolution: "semantic",
+			Reason:     reason,
+		})
+	}
+	return capabilities
+}
+
+func indexCurrentCapability(available bool, resolution, reason string) apiv1.Capability {
+	return apiv1.Capability{
+		Name:       "index.current",
+		Available:  available,
+		Resolution: resolution,
+		Reason:     reason,
+	}
+}
+
+func graphCapability(index store.Index, current bool) apiv1.Capability {
+	if len(index.Nodes) == 0 {
+		return apiv1.Capability{
+			Name:      "graph",
+			Available: false,
+			Reason:    "no graph facts persisted",
+		}
+	}
+	if !current {
+		return apiv1.Capability{
+			Name:       "graph",
+			Available:  false,
+			Resolution: "semantic",
+			Reason:     "persisted graph is stale",
+		}
+	}
+	return apiv1.Capability{
+		Name:       "graph",
+		Available:  true,
+		Resolution: "semantic",
+	}
+}
+
+func storeNodes(nodes []graph.Node) []store.Node {
+	out := make([]store.Node, 0, len(nodes))
+	for _, node := range nodes {
+		out = append(out, store.Node{
+			ID:          node.ID,
+			Kind:        node.Kind,
+			Name:        node.Name,
+			Path:        node.Path,
+			Language:    node.Language,
+			PackagePath: node.PackagePath,
+			StartLine:   node.StartLine,
+			EndLine:     node.EndLine,
+			External:    node.External,
+		})
+	}
+	return out
+}
+
+func storeEdges(edges []graph.Edge) []store.Edge {
+	out := make([]store.Edge, 0, len(edges))
+	for _, edge := range edges {
+		out = append(out, store.Edge{
+			From:       edge.From,
+			To:         edge.To,
+			Relation:   edge.Relation,
+			Evidence:   edge.Evidence,
+			Resolution: edge.Resolution,
+			Extractor:  edge.Extractor,
+			SourcePath: edge.SourcePath,
+			StartLine:  edge.StartLine,
+		})
+	}
+	return out
+}
+
+func appendReason(existing, reason string) string {
+	if existing == "" {
+		return reason
+	}
+	return existing + "; " + reason
 }
 
 func workspaceChangedResult(

@@ -117,9 +117,16 @@ type Snapshot struct {
 	Sources  []Source `json:"sources"`
 }
 
+type GraphSummary struct {
+	Nodes     int      `json:"nodes"`
+	Edges     int      `json:"edges"`
+	Languages []string `json:"languages,omitempty"`
+}
+
 type ScanData struct {
-	Snapshot Snapshot `json:"snapshot"`
-	Warnings []string `json:"warnings,omitempty"`
+	Snapshot Snapshot     `json:"snapshot"`
+	Graph    GraphSummary `json:"graph"`
+	Warnings []string     `json:"warnings,omitempty"`
 }
 
 type APIError struct {

@@ -16,6 +16,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		BaseCommit:           "abc123",
 		WorkspaceFingerprint: "sha256:workspace",
 		State:                "EXACT",
+		AnalysisVersion:      1,
 		Sources: []Source{
 			{
 				Path:        "a.go",
@@ -23,12 +24,32 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 				ContentHash: "sha256:a",
 				Size:        12,
 			},
+		},
+		Nodes: []Node{
 			{
-				Path:        "script.sh",
-				Kind:        "regular",
-				Executable:  true,
-				ContentHash: "sha256:b",
-				Size:        8,
+				ID:          "go:package:example.com/a",
+				Kind:        "PACKAGE",
+				Name:        "a",
+				Language:    "go",
+				PackagePath: "example.com/a",
+			},
+			{
+				ID:       "file:a.go",
+				Kind:     "FILE",
+				Name:     "a.go",
+				Path:     "a.go",
+				Language: "go",
+			},
+		},
+		Edges: []Edge{
+			{
+				From:       "go:package:example.com/a",
+				To:         "file:a.go",
+				Relation:   "CONTAINS",
+				Evidence:   "OBSERVED",
+				Resolution: "semantic",
+				Extractor:  "go/packages-v1",
+				SourcePath: "a.go",
 			},
 		},
 	}
@@ -44,11 +65,15 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if got.SnapshotID != input.SnapshotID ||
 		got.BaseCommit != input.BaseCommit ||
 		got.WorkspaceFingerprint != input.WorkspaceFingerprint ||
-		got.State != input.State {
+		got.State != input.State ||
+		got.AnalysisVersion != input.AnalysisVersion {
 		t.Fatalf("round trip mismatch: got %+v want %+v", got, input)
 	}
-	if len(got.Sources) != 2 || !got.Sources[1].Executable {
-		t.Fatalf("unexpected sources: %+v", got.Sources)
+	if len(got.Sources) != 1 || len(got.Nodes) != 2 || len(got.Edges) != 1 {
+		t.Fatalf("unexpected persisted graph: %+v", got)
+	}
+	if got.Edges[0].Evidence != "OBSERVED" || got.Edges[0].Resolution != "semantic" {
+		t.Fatalf("unexpected edge provenance: %+v", got.Edges[0])
 	}
 
 	info, err := os.Stat(path)
@@ -70,9 +95,10 @@ func TestLoadMissingReturnsNotFound(t *testing.T) {
 func TestLoadRejectsUnsupportedSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.sqlite3")
 	if err := Save(context.Background(), path, Index{
-		SnapshotID: "snap",
-		BaseCommit: "abc",
-		State:      "EXACT",
+		SnapshotID:      "snap",
+		BaseCommit:      "abc",
+		State:           "EXACT",
+		AnalysisVersion: 1,
 	}); err != nil {
 		t.Fatalf("seed index: %v", err)
 	}

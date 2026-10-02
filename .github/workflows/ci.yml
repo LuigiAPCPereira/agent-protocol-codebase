@@ -21,9 +21,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Verify dependency metadata
+      - name: Resolve dependency metadata
         run: |
           go mod tidy
+          echo AP_CODEBASE_GENERATED_GO_MOD_BEGIN
+          cat go.mod
+          echo AP_CODEBASE_GENERATED_GO_MOD_END
+          echo AP_CODEBASE_GENERATED_GO_SUM_BEGIN
+          cat go.sum
+          echo AP_CODEBASE_GENERATED_GO_SUM_END
           test -z "$(git status --porcelain -- go.mod go.sum)"
 
       - name: Check formatting

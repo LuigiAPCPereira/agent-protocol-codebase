@@ -11,6 +11,7 @@ import (
 
 	apiv1 "github.com/LuigiAPCPereira/agent-protocol-codebase/api/v1"
 	"github.com/LuigiAPCPereira/agent-protocol-codebase/internal/repository"
+	"github.com/LuigiAPCPereira/agent-protocol-codebase/internal/store"
 )
 
 func TestExecuteStatusReturnsObservedRevision(t *testing.T) {
@@ -89,13 +90,61 @@ func TestExecuteScanPersistsExactIndex(t *testing.T) {
 	if after.Index.SnapshotID != result.Index.SnapshotID {
 		t.Fatalf("persisted snapshot = %q, want %q", after.Index.SnapshotID, result.Index.SnapshotID)
 	}
+}
+
+func TestExecuteScanPersistsGoSemanticGraph(t *testing.T) {
+	repo := newGoRepository(t)
+	ctx := context.Background()
+
+	discovered := status(t, ctx, repo)
+	result := scan(t, ctx, repo, discovered.Repository.Revision)
+	if result.Index.State != apiv1.IndexExact {
+		t.Fatalf("scan index state = %q, want EXACT; reason=%s", result.Index.State, result.Index.PartialReason)
+	}
+
+	var data apiv1.ScanData
+	if err := json.Unmarshal(result.Data, &data); err != nil {
+		t.Fatalf("decode scan result: %v", err)
+	}
+	if data.Graph.Nodes < 3 || data.Graph.Edges < 2 {
+		t.Fatalf("graph summary too small: %+v", data.Graph)
+	}
+	if len(data.Graph.Languages) != 1 || data.Graph.Languages[0] != "go" {
+		t.Fatalf("graph languages = %v, want [go]", data.Graph.Languages)
+	}
 
 	indexPath, err := repository.IndexPath(ctx, repo)
 	if err != nil {
 		t.Fatalf("resolve index path: %v", err)
 	}
-	if _, err := os.Stat(indexPath); err != nil {
-		t.Fatalf("stat persisted index: %v", err)
+	persisted, err := store.Load(ctx, indexPath)
+	if err != nil {
+		t.Fatalf("load persisted graph: %v", err)
+	}
+
+	foundPackage := false
+	foundSymbol := false
+	for _, node := range persisted.Nodes {
+		if node.ID == "go:package:example.com/fixture" {
+			foundPackage = true
+		}
+		if node.ID == "go:symbol:example.com/fixture:Service" && node.Kind == "TYPE" {
+			foundSymbol = true
+		}
+	}
+	if !foundPackage || !foundSymbol {
+		t.Fatalf("missing semantic nodes: %+v", persisted.Nodes)
+	}
+	if len(persisted.Edges) == 0 {
+		t.Fatal("expected persisted semantic edges")
+	}
+
+	after := status(t, ctx, repo)
+	if after.Index.State != apiv1.IndexExact {
+		t.Fatalf("persisted Go index state = %q, want EXACT", after.Index.State)
+	}
+	if !capabilityAvailable(after.Capabilities, "graph") {
+		t.Fatalf("status did not advertise current graph capability: %+v", after.Capabilities)
 	}
 }
 
@@ -170,6 +219,15 @@ func TestExecuteScanAcceptsExactDirtyFingerprint(t *testing.T) {
 	}
 }
 
+func capabilityAvailable(capabilities []apiv1.Capability, name string) bool {
+	for _, capability := range capabilities {
+		if capability.Name == name {
+			return capability.Available
+		}
+	}
+	return false
+}
+
 func status(t *testing.T, ctx context.Context, repo string) apiv1.Result {
 	t.Helper()
 	result := Execute(ctx, apiv1.Request{
@@ -212,6 +270,36 @@ func newGitRepository(t *testing.T) string {
 	runGit(t, dir, "add", "tracked.txt")
 	runGit(t, dir, "-c", "user.name=Agent Protocol Test", "-c", "user.email=test@example.invalid", "commit", "-m", "initial")
 	return dir
+}
+
+func newGoRepository(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	writeTestFile(t, dir, "go.mod", "module example.com/fixture\n\ngo 1.26.0\n")
+	writeTestFile(t, dir, "main.go", `package fixture
+
+import "fmt"
+
+type Service struct{}
+
+func Hello() string { return fmt.Sprint("hello") }
+`)
+	runGit(t, dir, "add", "go.mod", "main.go")
+	runGit(t, dir, "-c", "user.name=Agent Protocol Test", "-c", "user.email=test@example.invalid", "commit", "-m", "initial")
+	return dir
+}
+
+func writeTestFile(t *testing.T, root, path, content string) {
+	t.Helper()
+	full := filepath.Join(root, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
