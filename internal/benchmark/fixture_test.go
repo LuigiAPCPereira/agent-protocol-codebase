@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -99,7 +100,10 @@ func deriveFixtureFacts(t *testing.T, root string) map[string]struct{} {
 		}
 
 		for _, imp := range parsed.Imports {
-			importPath := strings.Trim(imp.Path.Value, """)
+			importPath, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				return err
+			}
 			if strings.HasPrefix(importPath, modulePath) {
 				facts["imports|"+packagePath+"|"+importPath] = struct{}{}
 			}
