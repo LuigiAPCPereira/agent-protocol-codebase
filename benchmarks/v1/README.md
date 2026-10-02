@@ -182,3 +182,29 @@ isolation.
 
 The comparison output deliberately contains both scored arms and no synthetic
 winner field. Correctness and cost remain separate evidence axes.
+
+
+## Batch ingestion
+
+Once fresh-context submission envelopes exist, validate and score several of
+them together with:
+
+```sh
+go run ./cmd/ap-codebase-bench-batch \
+  benchmarks/v1/tasks.json \
+  benchmarks/v1/prompts.json \
+  benchmarks/v1/fixture \
+  raw-task-1.json \
+  codebase-task-1.json \
+  raw-task-2.json \
+  codebase-task-2.json
+```
+
+Batch ingestion is intentionally validation + evidence organization, not a
+leaderboard. It emits individual scores sorted by task and arm.
+
+The batch fails closed when submissions mix repository revisions, duplicate the
+same `(arm, task)` pair, or reuse one `context_id` across different arms.
+Reusing one fresh context across multiple tasks of the **same** arm is allowed,
+so a harness may evaluate an arm as one isolated session while preserving
+cross-arm isolation.
