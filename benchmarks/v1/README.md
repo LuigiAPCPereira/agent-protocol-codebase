@@ -101,3 +101,37 @@ budget on isolated agent runs.
 A raw agent run is invalid when the evaluating context has already seen the
 fixture layout or expected facts. Use a fresh isolated context for each arm and
 task family, with no transcript or intermediate-output leakage.
+
+
+## Blind agent bundle
+
+Real raw-vs-Codebase agent runs must use `prompts.json`, not `tasks.json`.
+
+The evaluator-owned `tasks.json` contains expected facts and must stay hidden
+from the evaluated agent. The agent-visible bundle contains only:
+
+```text
+benchmarks/v1/fixture/
+benchmarks/v1/prompts.json
+```
+
+`prompts.json` carries only benchmark version, fixture identity, task IDs, and
+task prompts. It intentionally contains no expected facts or scorer material.
+
+The committed blind manifest is validated against `tasks.json` so task order,
+IDs, and prompts cannot silently drift. Tests also scan the blind JSON for every
+expected fact and fail if oracle material leaks.
+
+To regenerate the blind manifest deterministically:
+
+```sh
+go run ./cmd/ap-codebase-bench-blind benchmarks/v1/tasks.json
+```
+
+The command writes the blind JSON to stdout; the evaluator may compare that
+output with the committed `prompts.json`.
+
+For a valid comparative run, create a fresh context for each arm. Give that
+context the same fixture revision and the same blind prompt, but never
+`tasks.json`, scorer output, another arm's transcript, discovered paths, or
+previous answers.
