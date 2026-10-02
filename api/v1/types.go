@@ -176,6 +176,25 @@ type PathData struct {
 	Edges     []GraphEdge `json:"edges"`
 }
 
+type ImpactArguments struct {
+	Target   string `json:"target"`
+	MaxDepth int    `json:"max_depth,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
+}
+
+type ImpactEntry struct {
+	Node  GraphNode `json:"node"`
+	Depth int       `json:"depth"`
+}
+
+type ImpactData struct {
+	Target    GraphNode     `json:"target"`
+	Affected  []ImpactEntry `json:"affected"`
+	Edges     []GraphEdge   `json:"edges"`
+	Semantics string        `json:"semantics"`
+	Truncated bool          `json:"truncated,omitempty"`
+}
+
 type ScanData struct {
 	Snapshot Snapshot     `json:"snapshot"`
 	Graph    GraphSummary `json:"graph"`

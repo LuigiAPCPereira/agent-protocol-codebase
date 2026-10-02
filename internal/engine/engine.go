@@ -48,6 +48,8 @@ func Execute(ctx context.Context, req apiv1.Request) apiv1.Result {
 		return executeQuery(ctx, req, result)
 	case apiv1.OperationPath:
 		return executePath(ctx, req, result)
+	case apiv1.OperationImpact:
+		return executeImpact(ctx, req, result)
 	default:
 		result.Error = &apiv1.APIError{
 			Code:    "NOT_IMPLEMENTED",
