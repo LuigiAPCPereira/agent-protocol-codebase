@@ -195,6 +195,63 @@ type ImpactData struct {
 	Truncated bool          `json:"truncated,omitempty"`
 }
 
+type DiffArguments struct {
+	BaseSnapshotID string `json:"base_snapshot_id"`
+	HeadSnapshotID string `json:"head_snapshot_id"`
+	Limit          int    `json:"limit,omitempty"`
+}
+
+type ChangeCounts struct {
+	Added   int `json:"added"`
+	Removed int `json:"removed"`
+	Changed int `json:"changed,omitempty"`
+}
+
+type EdgeChangeCounts struct {
+	Added   int `json:"added"`
+	Removed int `json:"removed"`
+}
+
+type SourceChange struct {
+	Before Source `json:"before"`
+	After  Source `json:"after"`
+}
+
+type GraphNodeChange struct {
+	Before GraphNode `json:"before"`
+	After  GraphNode `json:"after"`
+}
+
+type SourceDiff struct {
+	Counts  ChangeCounts   `json:"counts"`
+	Added   []Source       `json:"added"`
+	Removed []Source       `json:"removed"`
+	Changed []SourceChange `json:"changed"`
+}
+
+type GraphNodeDiff struct {
+	Counts  ChangeCounts      `json:"counts"`
+	Added   []GraphNode       `json:"added"`
+	Removed []GraphNode       `json:"removed"`
+	Changed []GraphNodeChange `json:"changed"`
+}
+
+type GraphEdgeDiff struct {
+	Counts  EdgeChangeCounts `json:"counts"`
+	Added   []GraphEdge      `json:"added"`
+	Removed []GraphEdge      `json:"removed"`
+}
+
+type DiffData struct {
+	BaseSnapshotID string        `json:"base_snapshot_id"`
+	HeadSnapshotID string        `json:"head_snapshot_id"`
+	AnalysisVersion int          `json:"analysis_version"`
+	Sources        SourceDiff    `json:"sources"`
+	Nodes          GraphNodeDiff `json:"nodes"`
+	Edges          GraphEdgeDiff `json:"edges"`
+	Truncated      bool          `json:"truncated,omitempty"`
+}
+
 type ScanData struct {
 	Snapshot Snapshot     `json:"snapshot"`
 	Graph    GraphSummary `json:"graph"`

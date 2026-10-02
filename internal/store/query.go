@@ -56,11 +56,20 @@ func Query(ctx context.Context, path string, filter QueryFilter) (QueryResult, e
 		return QueryResult{}, fmt.Errorf("%w: got %d, want %d", ErrUnsupportedSchema, version, schemaVersion)
 	}
 
+	var snapshotID string
+	if err := db.QueryRowContext(ctx, "SELECT snapshot_id FROM current_index WHERE id = 1").Scan(&snapshotID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return QueryResult{}, ErrNotFound
+		}
+		return QueryResult{}, fmt.Errorf("read current index pointer: %w", err)
+	}
+
 	where, args := nodeWhere(filter)
+	args = append([]any{snapshotID}, args...)
 	args = append(args, limit+1)
 
 	const columns = "id, kind, name, path, language, package_path, start_line, end_line, external"
-	query := "SELECT " + columns + " FROM nodes WHERE " + where +
+	query := "SELECT " + columns + " FROM nodes WHERE snapshot_id = ? AND (" + where + ")" +
 		" ORDER BY external ASC, lower(name), id LIMIT ?"
 
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -120,7 +129,7 @@ func Query(ctx context.Context, path string, filter QueryFilter) (QueryResult, e
 		edgeLimit = 100
 	}
 
-	edges, truncatedEdges, err := incidentEdges(ctx, db, matchIDs, edgeLimit)
+	edges, truncatedEdges, err := incidentEdges(ctx, db, snapshotID, matchIDs, edgeLimit)
 	if err != nil {
 		return QueryResult{}, err
 	}
@@ -140,7 +149,7 @@ func Query(ctx context.Context, path string, filter QueryFilter) (QueryResult, e
 	}
 
 	if len(endpointIDs) > 0 {
-		neighbors, err := nodesByID(ctx, db, endpointIDs)
+		neighbors, err := nodesByID(ctx, db, snapshotID, endpointIDs)
 		if err != nil {
 			return QueryResult{}, err
 		}
@@ -184,11 +193,13 @@ func nodeWhere(filter QueryFilter) (string, []any) {
 func incidentEdges(
 	ctx context.Context,
 	db *sql.DB,
+	snapshotID string,
 	matchIDs []string,
 	limit int,
 ) ([]Edge, bool, error) {
 	placeholders := questionMarks(len(matchIDs))
-	args := make([]any, 0, len(matchIDs)*2+1)
+	args := make([]any, 0, len(matchIDs)*2+2)
+	args = append(args, snapshotID)
 	for _, id := range matchIDs {
 		args = append(args, id)
 	}
@@ -198,7 +209,7 @@ func incidentEdges(
 	args = append(args, limit+1)
 
 	query := "SELECT from_id, to_id, relation, evidence, resolution, extractor, source_path, start_line " +
-		"FROM edges WHERE from_id IN (" + placeholders + ") OR to_id IN (" + placeholders + ") " +
+		"FROM edges WHERE snapshot_id = ? AND (from_id IN (" + placeholders + ") OR to_id IN (" + placeholders + ")) " +
 		"ORDER BY from_id, relation, to_id, source_path, start_line LIMIT ?"
 
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -235,20 +246,21 @@ func incidentEdges(
 	return edges, truncated, nil
 }
 
-func nodesByID(ctx context.Context, db *sql.DB, ids map[string]struct{}) ([]Node, error) {
+func nodesByID(ctx context.Context, db *sql.DB, snapshotID string, ids map[string]struct{}) ([]Node, error) {
 	ordered := make([]string, 0, len(ids))
 	for id := range ids {
 		ordered = append(ordered, id)
 	}
 	sortStrings(ordered)
 
-	args := make([]any, 0, len(ordered))
+	args := make([]any, 0, len(ordered)+1)
+	args = append(args, snapshotID)
 	for _, id := range ordered {
 		args = append(args, id)
 	}
 
 	const columns = "id, kind, name, path, language, package_path, start_line, end_line, external"
-	query := "SELECT " + columns + " FROM nodes WHERE id IN (" + questionMarks(len(ordered)) + ") ORDER BY id"
+	query := "SELECT " + columns + " FROM nodes WHERE snapshot_id = ? AND id IN (" + questionMarks(len(ordered)) + ") ORDER BY id"
 
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {

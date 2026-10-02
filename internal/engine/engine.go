@@ -50,6 +50,8 @@ func Execute(ctx context.Context, req apiv1.Request) apiv1.Result {
 		return executePath(ctx, req, result)
 	case apiv1.OperationImpact:
 		return executeImpact(ctx, req, result)
+	case apiv1.OperationDiff:
+		return executeDiff(ctx, req, result)
 	default:
 		result.Error = &apiv1.APIError{
 			Code:    "NOT_IMPLEMENTED",
