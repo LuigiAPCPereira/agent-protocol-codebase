@@ -208,3 +208,56 @@ same `(arm, task)` pair, or reuse one `context_id` across different arms.
 Reusing one fresh context across multiple tasks of the **same** arm is allowed,
 so a harness may evaluate an arm as one isolated session while preserving
 cross-arm isolation.
+
+
+## External arm pack
+
+Generate two evaluator-safe workspaces for fresh agents with:
+
+```sh
+go build -o /tmp/ap-codebase ./cmd/ap-codebase
+
+go run ./cmd/ap-codebase-bench-pack \
+  --prompts benchmarks/v1/prompts.json \
+  --fixture benchmarks/v1/fixture \
+  --engine /tmp/ap-codebase \
+  --output /tmp/codebase-bench-v1
+```
+
+The packer creates:
+
+```text
+raw/
+  AGENT_INSTRUCTIONS.md
+  identity.json
+  prompts.json
+  submission.template.json
+  repo/
+
+codebase/
+  AGENT_INSTRUCTIONS.md
+  identity.json
+  prompts.json
+  submission.template.json
+  repo/
+  tools/ap-codebase
+```
+
+Both `repo/` directories are initialized from the same fixture with the same
+deterministic Git commit. Neither arm contains `tasks.json` or expected facts.
+Only the Codebase arm receives the `ap-codebase` binary, outside the evaluated
+repository.
+
+The raw arm may use ordinary repository/file/search/shell and standard language
+toolchain commands, but no precomputed code graph, LSP/index service,
+ctags-like index, or Codebase API. The Codebase arm receives those same raw
+capabilities plus `ap-codebase`.
+
+A real harness must launch the two arm directories in separate fresh model
+contexts/processes and disable external network access. The generated
+instructions forbid leaving the arm directory or seeking evaluator material,
+but filesystem and network isolation remain responsibilities of the host
+harness.
+
+The packer fails closed when its output path is empty or overlaps the fixture,
+because it replaces the output directory on each generation.

@@ -37,3 +37,19 @@ jobs:
 
       - name: Codebase benchmark tracer
         run: go run ./cmd/ap-codebase-bench-smoke benchmarks/v1/tasks.json benchmarks/v1/fixture
+
+      - name: Blind benchmark arm pack
+        run: |
+          go build -o "$RUNNER_TEMP/ap-codebase" ./cmd/ap-codebase
+          go run ./cmd/ap-codebase-bench-pack \
+            --prompts benchmarks/v1/prompts.json \
+            --fixture benchmarks/v1/fixture \
+            --engine "$RUNNER_TEMP/ap-codebase" \
+            --output "$RUNNER_TEMP/bench-pack"
+          test ! -e "$RUNNER_TEMP/bench-pack/raw/tools/ap-codebase"
+          test "$(
+            git -C "$RUNNER_TEMP/bench-pack/raw/repo" rev-parse HEAD
+          )" = "$(
+            git -C "$RUNNER_TEMP/bench-pack/codebase/repo" rev-parse HEAD
+          )"
+          "$RUNNER_TEMP/bench-pack/codebase/tools/ap-codebase" version --json
