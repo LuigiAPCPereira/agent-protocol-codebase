@@ -109,6 +109,100 @@ func TestLoadSnapshotMissingReturnsSnapshotNotFound(t *testing.T) {
 	}
 }
 
+
+func TestSaveRebuildsKnownLegacySchemas(t *testing.T) {
+	for _, version := range []int{1, 2} {
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "legacy.sqlite3")
+			db, err := sql.Open("sqlite3", path)
+			if err != nil {
+				t.Fatalf("open legacy db: %v", err)
+			}
+			if _, err := db.Exec("CREATE TABLE legacy_marker (id INTEGER PRIMARY KEY)"); err != nil {
+				db.Close()
+				t.Fatalf("create legacy marker: %v", err)
+			}
+			if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+				db.Close()
+				t.Fatalf("set legacy version: %v", err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatalf("close legacy db: %v", err)
+			}
+
+			want := testIndex("rebuilt", "sha256:new")
+			if err := Save(context.Background(), path, want); err != nil {
+				t.Fatalf("save over legacy schema v%d: %v", version, err)
+			}
+
+			got, err := Load(context.Background(), path)
+			if err != nil {
+				t.Fatalf("load rebuilt index: %v", err)
+			}
+			assertIndexIdentity(t, got, want)
+
+			db, err = sql.Open("sqlite3", readOnlyDSN(path))
+			if err != nil {
+				t.Fatalf("open rebuilt db: %v", err)
+			}
+			defer db.Close()
+
+			var schema int
+			if err := db.QueryRow("PRAGMA user_version").Scan(&schema); err != nil {
+				t.Fatalf("read rebuilt schema: %v", err)
+			}
+			if schema != schemaVersion {
+				t.Fatalf("rebuilt schema = %d, want %d", schema, schemaVersion)
+			}
+
+			var markerCount int
+			err = db.QueryRow(
+				"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'legacy_marker'",
+			).Scan(&markerCount)
+			if err != nil {
+				t.Fatalf("inspect rebuilt schema: %v", err)
+			}
+			if markerCount != 0 {
+				t.Fatal("legacy schema marker survived rebuild")
+			}
+		})
+	}
+}
+
+func TestSaveRejectsUnknownSchemaWithoutReplacingIt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unknown.sqlite3")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatalf("open unknown db: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 99"); err != nil {
+		db.Close()
+		t.Fatalf("set unknown schema version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close unknown db: %v", err)
+	}
+
+	err = Save(context.Background(), path, testIndex("new", "sha256:new"))
+	if !errors.Is(err, ErrUnsupportedSchema) {
+		t.Fatalf("save error = %v, want ErrUnsupportedSchema", err)
+	}
+
+	db, err = sql.Open("sqlite3", readOnlyDSN(path))
+	if err != nil {
+		t.Fatalf("reopen unknown db: %v", err)
+	}
+	defer db.Close()
+
+	var version int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read preserved unknown schema: %v", err)
+	}
+	if version != 99 {
+		t.Fatalf("unknown schema version = %d, want 99", version)
+	}
+}
+
 func TestLoadRejectsUnsupportedSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.sqlite3")
 	if err := Save(context.Background(), path, testIndex("snap", "sha256:a")); err != nil {

@@ -71,6 +71,9 @@ func Save(ctx context.Context, path string, index Index) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create index directory: %w", err)
 	}
+	if err := rebuildLegacyIndex(ctx, path); err != nil {
+		return err
+	}
 
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
@@ -139,6 +142,42 @@ func Save(ctx context.Context, path string, index Index) error {
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		return fmt.Errorf("restrict index permissions: %w", err)
+	}
+	return nil
+}
+
+
+func rebuildLegacyIndex(ctx context.Context, path string) error {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat existing index: %w", err)
+	}
+
+	db, err := sql.Open("sqlite3", readOnlyDSN(path))
+	if err != nil {
+		return fmt.Errorf("open existing index: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+
+	var version int
+	queryErr := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version)
+	closeErr := db.Close()
+	if queryErr != nil {
+		return fmt.Errorf("read existing index schema: %w", queryErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close existing index: %w", closeErr)
+	}
+
+	switch version {
+	case 1, 2:
+		for _, candidate := range []string{path, path + "-wal", path + "-shm"} {
+			if err := os.Remove(candidate); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove legacy index %q: %w", candidate, err)
+			}
+		}
 	}
 	return nil
 }
