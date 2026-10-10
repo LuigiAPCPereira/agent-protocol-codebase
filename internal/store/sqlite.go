@@ -146,7 +146,6 @@ func Save(ctx context.Context, path string, index Index) error {
 	return nil
 }
 
-
 func rebuildLegacyIndex(ctx context.Context, path string) error {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {

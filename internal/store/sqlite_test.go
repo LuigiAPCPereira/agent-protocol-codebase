@@ -109,7 +109,6 @@ func TestLoadSnapshotMissingReturnsSnapshotNotFound(t *testing.T) {
 	}
 }
 
-
 func TestSaveRebuildsKnownLegacySchemas(t *testing.T) {
 	for _, version := range []int{1, 2} {
 		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
