@@ -1,0 +1,20 @@
+{
+  "benchmark_version": 1,
+  "fixture_id": "codebase-bench-v1-fixture-1",
+  "task_id": "locate-service",
+  "arm": "codebase",
+  "repository_revision": "replace-with-exact-repository-revision",
+  "facts": [
+    "declares|lib/service.go|example.com/bench/lib.Service"
+  ],
+  "cost": {
+    "tool_calls": 2,
+    "files_opened": 0,
+    "input_tokens": null,
+    "output_tokens": null,
+    "elapsed_ms": null
+  },
+  "notes": [
+    "Token and elapsed metrics were unavailable in this example."
+  ]
+}
